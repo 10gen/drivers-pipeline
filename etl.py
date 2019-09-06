@@ -86,7 +86,8 @@ def driver_names():
                 'nodejs',
                 'nodejs-core',
                 'PyMongo',
-                'PyMongo|Motor'
+                'PyMongo|Motor',
+                'mongo-java-driver|sync|mongo-kafka'
             ]
 
 def driver_name_condition():
