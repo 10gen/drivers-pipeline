@@ -20,7 +20,15 @@ logging.basicConfig(filename='drivers_metrics.log',level=logging.INFO)
 
 # todo define Keys, driver names, etc.
 
-MAX_DELTA = 2
+MAX_DELTA = 1
+STAGING_COLLECTION = "drivers_staging"
+INTERNAL_TOOLS_COLLECTION = "drivers_stats"
+EXTERNAL_APPS_COLLECTION = "drivers_stats_external"
+
+def internal_apps_regex():
+    regex = re.compile(r"(stitch\||mongosqld|MongoDB Automation Agent|MongoDB Atlas|MongoDB Compass)")
+    return regex
+
 
 def today_midnight():
     today = datetime.today()
@@ -40,7 +48,6 @@ def start_and_end_date(end_date_string=None,start_date_string=None):
     #start_date = end_date -timedelta(delta)
     start_date = get_date(start_date_string)
     return (start_date,end_date)
-
 
 def default_start_end_date(collection):
     pipeline = [
@@ -93,7 +100,6 @@ def driver_names():
 def driver_name_condition():
     return list(map(lambda x: {'entries.raw.driver.name': x}, driver_names()))
 
-
 def pipeline_drivers(start_date,end_date):
     pipeline = [
         {
@@ -114,7 +120,6 @@ def pipeline_drivers(start_date,end_date):
             }
         }, {
             '$project': {
-                'count': '$entries.count',
                 'ts': '$rt',
                 'd': '$entries.raw.driver.name',
                 'dv': '$entries.raw.driver.version',
@@ -123,11 +128,12 @@ def pipeline_drivers(start_date,end_date):
                 'os': '$entries.raw.os.name',
                 'osa': '$entries.raw.os.architecture',
                 'osv': '$entries.raw.os.version',
+                'a': '$entries.raw.application.name',
                 'p': '$entries.raw.platform',
                 'sv': '$mv',
                 'day': {'$dayOfMonth': '$rt'},
                 'month': {'$month': '$rt'},
-                'year': {'$year': '$rt'}
+                'year': {'$year': '$rt'},
             }
         },{
             '$group': {
@@ -139,6 +145,7 @@ def pipeline_drivers(start_date,end_date):
                     'osa': '$osa',
                     'osv': '$osv',
                     'p': '$p',
+                    'a': '$a',
                     'sv': '$sv',
                     'day': '$day',
                     'month': '$month',
@@ -146,9 +153,6 @@ def pipeline_drivers(start_date,end_date):
                 },
                 'ts': {
                     '$last': '$ts'
-                },
-                'c': {
-                    '$sum': '$count'
                 }
             }
         }, {
@@ -158,31 +162,67 @@ def pipeline_drivers(start_date,end_date):
                 'gid': '$_id.gid',
                 'os': '$_id.os',
                 'osa': '$_id.osa',
-                    'p': '$_id.p',
+                'p': '$_id.p',
+                'a': '$_id.a',
                 'sv': '$_id.sv',
                 'day': '$_id.day',
                 'month': '$_id.month',
                 'year': '$_id.year',
                 'ts': 1,
-                'c': 1,
                 '_id': 0
             }
         }
     ]
     return pipeline
 
-
+def pipeline_external_apps():
+    pipeline = [
+    {
+        '$group': {
+            '_id': {
+                'd': '$d',
+                'dv': '$dv',
+                'gid': '$gid',
+                'sv': '$sv',
+                'day': '$day',
+                'p': '$p',
+                'month': '$month',
+                'year': '$year',
+                'lver': '$lver',
+                'prov': '$prov',
+                'fr': '$fr'
+            },
+            'ts': {
+                '$max': '$ts'
+            }
+        }
+    }, {
+        '$project': {
+            'ts': 1,
+            'd': '$_id.d',
+            'dv': '$_id.dv',
+            'gid': '$_id.gid',
+            'sv': '$_id.sv',
+            'p': '$_id.p',
+            'day': '$_id.day',
+            'month': '$_id.month',
+            'year': '$_id.year',
+            'lver': '$_id.lver',
+            'fr': '$_id.fr',
+            'prov': '$_id.prov',
+            '_id': 0
+        }
+    }
+]
+    return pipeline
 
 def run_aggregation(collection,pipeline,maxMS=10000000,allowDisk=True):
     return list(collection.aggregate(pipeline,maxTimeMS = maxMS,allowDiskUse=allowDisk))
 
-
-#### TODO: create a class or method for each framework that is parseable. For this framework,
 def language_version_and_framework(doc):
     language_version = None
     framework = None
-    #print(doc)
-    #pdb.set_trace()
+    provider = None
     driver_name = doc['d']
     if 'p' in doc:
         try:
@@ -200,6 +240,7 @@ def language_version_and_framework(doc):
                 language_version = platform_name.replace('go','')
             elif driver_name in ['mongo-java-driver','mongo-java-driver|mongo-java-driver-reactivestreams','mongo-java-driver|mongo-java-driver-rx']:
                 #Java/Oracle Corporation/1.8.0_181-b15
+                provider = platform_name.split('/')[1]
                 language_version = platform_name.split('/')[2]
             elif driver_name == 'mongo-java-driver|mongo-scala-driver':
                 #'Java/Oracle Corporation/1.8.0_202-b08|Scala/2.12.6'
@@ -235,6 +276,8 @@ def language_version_and_framework(doc):
                 doc['lver'] = language_version
             if framework is not None:
                 doc['fr'] = framework
+            if provider is not None:
+                doc['prov'] = provider
 
         except Exception as e:
             logging.error("Exception %s for doc with platform string %s",e,platform_name)
@@ -242,6 +285,10 @@ def language_version_and_framework(doc):
     else:
         logging.info("Document with driver name %s did not have platform field",driver_name)
     return doc
+
+def process_all_docs(docs):
+    for doc in docs:
+        process_doc(doc)
 
 def update_list_with_lang_ver_framework(docs):
     result = list(map(lambda x: language_version_and_framework(x), docs))
@@ -252,7 +299,6 @@ def prod_connection_string(username,password):
 
 def postprocessing_connection_string(username,password):
     return "mongodb+srv://{}:{}@cluster0-ee68b.mongodb.net/test".format(username,password)
-
 
 def etl(start_date,end_date):
     #pdb.set_trace()
@@ -268,19 +314,47 @@ def etl(start_date,end_date):
     start_time = datetime.today()
     if len(docs) > 0:
         #transform
-        docs = update_list_with_lang_ver_framework(docs)
+        internal_list = [doc for doc in docs if ('a' in doc.keys() and internal_apps_regex().search(doc['a']))]
+        external_list = filter(lambda i: i not in internal_list, docs)
+        external_list = update_list_with_lang_ver_framework(external_list)
         #load
-        drivers_test.insert_many(docs)
-        logging.info("inserted %s docs",len(docs))
+        print("inserting internal tools:")
+        internal_collection.insert_many(internal_list)
+        print("inserting external apps:")
+        staging_collection.insert_many(external_list)
+        #logging.info("inserted %s docs",len(docs))
     else:
         logging.info("no docs. Check original dataset")
     end_time = datetime.today()
     time_elapsed = end_time - start_time
     print("parsing took {}".format(time_elapsed))
 
+def etl_external_drivers():
+    pipeline = pipeline_external_apps()
+    print(pipeline)
+    start_time = datetime.today()
+    docs = run_aggregation(staging_collection,pipeline)
+    end_time = datetime.today()
+    time_elapsed = end_time - start_time
+    print("aggregation took {}".format(time_elapsed))
+    external_collection.insert_many(docs)
 
-def full_etl(start_delta,end_date):
-    return None
+
+#db.drivers_stats.dropIndex("app_name_text"); db.drivers_stats.createIndex({a: "text", ts: 1},{name: "app_ts_text_compound"});
+
+
+def query_delete_many(start_date,end_date,collection):
+    query = {
+        'a': {
+            '$not': internal_apps_regex()
+        },
+        'ts': {
+            '$gte': start_date,
+            '$lt': end_date,
+        }
+    }
+    result = collection.deleteMany(query)
+    return result
 
 def get_secrets():
     stream = open('secrets.yml', 'r')
@@ -293,15 +367,19 @@ def etl_for_range_of_dates(start_date,end_date):
     #end_date = get_date(end_date)
     while (end_date - timedelta(MAX_DELTA)) > start_date:
         interim_start_date = end_date - timedelta(MAX_DELTA)
-        print("running etl for start_date: %s, end_date: %s" % (interim_start_date,end_date))
+        print("running staging etl for start_date: %s, end_date: %s" % (interim_start_date,end_date))
         etl(interim_start_date,end_date)
         end_date = interim_start_date
     if (end_date > start_date):
         print("running etl for start_date: %s, end_date: %s" % (start_date,end_date))
         etl(start_date,end_date)
-    print('finished etl')
-
-
+        print('finished staging etl')
+    print("running external docs aggregation")
+    etl_external_drivers()
+    print("finished external docs etl")
+    print("dropping staging collection")
+    staging_collection.drop()
+    print("Done.")
 
 
 if __name__ == "__main__":
@@ -314,7 +392,7 @@ if __name__ == "__main__":
     parser.add_argument('-start_delta', default = 7, type=int)
     parser.add_argument('-end_date') # format '%Y%m%d'
     parser.add_argument('-start_date')
-    parser.add_argument('--default_dates', dest='since_last', action='store_true')
+    #parser.add_argument('--default_dates', dest='since_last', action='store_true')
     parser.add_argument('--no-default_dates', dest='since_last', action='store_false')
     parser.set_defaults(since_last=True)
     options = parser.parse_args()
@@ -323,12 +401,14 @@ if __name__ == "__main__":
     prod = pymongo.MongoClient(prod_connection_string(options.username_dw_prod,options.pw_dw_prod))
     dw_raw = prod.dw_raw
     raw_metadata = prod.dw_raw['cloud__cloud_backend__rawclientmetadata']
-    my_cluster = pymongo.MongoClient(postprocessing_connection_string(options.u_postprocessing,options.pw_postprocessing))
-    db = my_cluster.transactions_metrics
-    drivers_test = db['drivers_test_new']
+    my_cluster = pymongo.MongoClient(postprocessing_connection_string(options.u_postprocessing,options.pw_postprocessing),retryWrites = True)
+    db = my_cluster.drivers
+    staging_collection = db[STAGING_COLLECTION]
+    internal_collection = db[INTERNAL_TOOLS_COLLECTION]
+    external_collection = db[EXTERNAL_APPS_COLLECTION]
     print('deriving dates...')
     if (options.since_last is True):
-        start_date,end_date = default_start_end_date(drivers_test)
+        start_date,end_date = default_start_end_date(external_collection)
     else:
         start_date,end_date = start_and_end_date(options.end_date,options.start_date)
     print('start date %s , end date %s' % (start_date,end_date))
