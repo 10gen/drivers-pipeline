@@ -162,6 +162,7 @@ def pipeline_drivers(start_date,end_date):
                 'gid': '$_id.gid',
                 'os': '$_id.os',
                 'osa': '$_id.osa',
+                'osv': '$_id.osv',
                 'p': '$_id.p',
                 'a': '$_id.a',
                 'sv': '$_id.sv',
@@ -190,7 +191,10 @@ def pipeline_external_apps():
                 'year': '$year',
                 'lver': '$lver',
                 'prov': '$prov',
-                'fr': '$fr'
+                'fr': '$fr',
+                'os': '$os',
+                'osa': '$osa',
+                'osv': '$osv'
             },
             'ts': {
                 '$max': '$ts'
@@ -210,6 +214,9 @@ def pipeline_external_apps():
             'lver': '$_id.lver',
             'fr': '$_id.fr',
             'prov': '$_id.prov',
+            'os': '$os',
+            'osa': '$osa',
+            'osv': '$osv',
             '_id': 0
         }
     }
@@ -303,6 +310,8 @@ def postprocessing_connection_string(username,password):
 def etl(start_date,end_date):
     #pdb.set_trace()
     #extract
+    client = mdb_client_dw_prod()
+    raw_metadata = get_raw_client_metadata(client)
     print(pipeline_drivers(start_date,end_date))
     logging.info(pipeline_drivers(start_date,end_date))
     start_time = datetime.today()
@@ -328,6 +337,14 @@ def etl(start_date,end_date):
     end_time = datetime.today()
     time_elapsed = end_time - start_time
     print("parsing took {}".format(time_elapsed))
+    print('finished staging etl')
+    print("starting etl_external_drivers:")
+    client.close()
+    print("starting etl_external_drivers")
+    etl_external_drivers()
+    print("dropping staging collection")
+    staging_collection.drop()
+    print("Done.")
 
 def etl_external_drivers():
     pipeline = pipeline_external_apps()
@@ -362,9 +379,18 @@ def get_secrets():
     username_dw_prod, pw_dw_prod, u_postprocessing, pw_postprocessing = (secrets['u_dw_prod'],secrets['pw_dw_prod'],secrets['u_postprocessing'],secrets['pw_postprocessing'])
     return (username_dw_prod, pw_dw_prod, u_postprocessing, pw_postprocessing)
 
+def mdb_client_dw_prod():
+    u_dw_prod, pw_dw_prod, u_dw_postproc, p_dw_postproc = get_secrets()
+    prod = pymongo.MongoClient(prod_connection_string(u_dw_prod,pw_dw_prod),
+        socketTimeoutMS = 3600000)
+    return prod
+
+def get_raw_client_metadata(client):
+    dw_raw = client.dw_raw
+    raw_metadata_collection = dw_raw['cloud__cloud_backend__rawclientmetadata']
+    return raw_metadata_collection
+
 def etl_for_range_of_dates(start_date,end_date):
-    #start_date = get_date(start_date)
-    #end_date = get_date(end_date)
     while (end_date - timedelta(MAX_DELTA)) > start_date:
         interim_start_date = end_date - timedelta(MAX_DELTA)
         print("running staging etl for start_date: %s, end_date: %s" % (interim_start_date,end_date))
@@ -373,14 +399,6 @@ def etl_for_range_of_dates(start_date,end_date):
     if (end_date > start_date):
         print("running etl for start_date: %s, end_date: %s" % (start_date,end_date))
         etl(start_date,end_date)
-        print('finished staging etl')
-    print("running external docs aggregation")
-    etl_external_drivers()
-    print("finished external docs etl")
-    print("dropping staging collection")
-    staging_collection.drop()
-    print("Done.")
-
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -398,10 +416,7 @@ if __name__ == "__main__":
     options = parser.parse_args()
     #pdb.set_trace()
     print('connecting..')
-    prod = pymongo.MongoClient(prod_connection_string(options.username_dw_prod,options.pw_dw_prod))
-    dw_raw = prod.dw_raw
-    raw_metadata = prod.dw_raw['cloud__cloud_backend__rawclientmetadata']
-    my_cluster = pymongo.MongoClient(postprocessing_connection_string(options.u_postprocessing,options.pw_postprocessing),retryWrites = True)
+    my_cluster = pymongo.MongoClient(postprocessing_connection_string(options.u_postprocessing,options.pw_postprocessing),retryWrites = True,socketTimeoutMS = 3600000)
     db = my_cluster.drivers
     staging_collection = db[STAGING_COLLECTION]
     internal_collection = db[INTERNAL_TOOLS_COLLECTION]
