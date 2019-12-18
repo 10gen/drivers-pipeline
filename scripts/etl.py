@@ -3,6 +3,7 @@
 import argparse
 import os
 import pandas as pd
+import numpy as np
 import pymongo
 import dns
 from bson.objectid import ObjectId
@@ -13,20 +14,19 @@ import yaml
 from datetime import timezone, datetime, tzinfo, date,time, timedelta
 import pdb
 import logging
+import time
 
 logging.basicConfig(filename='drivers_metrics.log',level=logging.INFO)
 
 #root_dir = os.path.abspath(os.path.join(__file__, '../..'))
 
-# todo define Keys, driver names, etc.
 
 MAX_DELTA = 1
-STAGING_COLLECTION = "drivers_staging"
-INTERNAL_TOOLS_COLLECTION = "drivers_stats"
-EXTERNAL_APPS_COLLECTION = "drivers_stats_external"
+INTERNAL_TOOLS_COLLECTION = "stats_internal_daily"
+EXTERNAL_APPS_COLLECTION = 'stats_external_daily'
 
 def internal_apps_regex():
-    regex = re.compile(r"(stitch\||mongosqld|MongoDB Automation Agent|MongoDB Atlas|MongoDB Compass)")
+    regex = re.compile(r"(stitch\||mongosqld|MongoDB Automation Agent|MongoDB Atlas|MongoDB Compass|mongoimport|mongoexport|mongodump|mongorestore|mongomirror)")
     return regex
 
 
@@ -72,15 +72,24 @@ def default_start_end_date(collection):
     end_date = today_midnight()
     return  (start_date,end_date)
 
-def driver_names():
+def java_driver_names():
+    return [
+        'mongo-java-driver',
+        'mongo-java-driver|mongo-java-driver-reactivestreams',
+        'mongo-java-driver|mongo-java-driver-rx',
+        'mongo-java-driver|mongo-scala-driver',
+        'mongo-java-driver|sync',
+        'mongo-java-driver|legacy',
+        'mongo-java-driver|async',
+        'mongo-java-driver|async|mongo-java-driver-reactivestreams',
+        'mongo-java-driver|async|mongo-scala-driver'
+    ]
+
+def other_drivers_names():
     return [
                 'mgo',
                 'mongo-csharp-driver',
                 'mongo-go-driver',
-                'mongo-java-driver',
-                'mongo-java-driver|mongo-java-driver-reactivestreams',
-                'mongo-java-driver|mongo-java-driver-rx',
-                'mongo-java-driver|mongo-scala-driver',
                 'mongo-ruby-driver',
                 'mongo-rust-driver-prototype',
                 'mongoc',
@@ -96,6 +105,9 @@ def driver_names():
                 'PyMongo|Motor',
                 'mongo-java-driver|sync|mongo-kafka'
             ]
+
+def driver_names():
+    return java_driver_names() + other_drivers_names()
 
 def driver_name_condition():
     return list(map(lambda x: {'entries.raw.driver.name': x}, driver_names()))
@@ -214,9 +226,9 @@ def pipeline_external_apps():
             'lver': '$_id.lver',
             'fr': '$_id.fr',
             'prov': '$_id.prov',
-            'os': '$os',
-            'osa': '$osa',
-            'osv': '$osv',
+            'os': '$_id.os',
+            'osa': '$_id.osa',
+            'osv': '$_id.osv',
             '_id': 0
         }
     }
@@ -245,15 +257,16 @@ def language_version_and_framework(doc):
             elif driver_name == 'mongo-go-driver':
                 #go1.10.8
                 language_version = platform_name.replace('go','')
-            elif driver_name in ['mongo-java-driver','mongo-java-driver|mongo-java-driver-reactivestreams','mongo-java-driver|mongo-java-driver-rx']:
-                #Java/Oracle Corporation/1.8.0_181-b15
+            elif driver_name in java_driver_names():
+                if driver_name == 'mongo-java-driver|mongo-scala-driver':
+                    #'Java/Oracle Corporation/1.8.0_202-b08|Scala/2.12.6'
+                    #TODO: confirm if need versions for both java and scala
+                    split_str = platform_name.replace('|','/').split('/')
+                    language_version = { 'java': split_str[2], 'scala': split_str[4]}
+                else:
+                    #Java/Oracle Corporation/1.8.0_181-b15
+                    language_version = platform_name.split('/')[2]
                 provider = platform_name.split('/')[1]
-                language_version = platform_name.split('/')[2]
-            elif driver_name == 'mongo-java-driver|mongo-scala-driver':
-                #'Java/Oracle Corporation/1.8.0_202-b08|Scala/2.12.6'
-                #TODO: confirm if need versions for both java and scala
-                split_str = platform_name.replace('|','/').split('/')
-                language_version = { 'java': split_str[2], 'scala': split_str[4]}
             elif driver_name == 'mongo-ruby-driver':
                 #'mongoid-6.3.0, 2.5.1, x86_64-linux-musl, x86_64-pc-linux-musl',
                 # '2.4.6, x86_64-linux, x86_64-pc-linux-gnu'
@@ -307,6 +320,31 @@ def prod_connection_string(username,password):
 def postprocessing_connection_string(username,password):
     return "mongodb+srv://{}:{}@cluster0-ee68b.mongodb.net/test".format(username,password)
 
+def function_with_time_elapsed(message):
+    def decorator(function):
+        def wrapper(*args,**kwargs):
+            start_time = datetime.today()
+            res = function(*args,**kwargs)
+            end_time = datetime.today()
+            time_elapsed = end_time - start_time
+            print("{}_{}".format(message,time_elapsed))
+            return res
+        return wrapper
+    return decorator
+
+def group_external_apps(list):
+    df = pd.DataFrame(list)
+    df = df.drop(columns=['a'])
+    df = df.replace('', ' ', regex = True)
+    df = df.replace(np.nan, '', regex = True)
+    df = df.groupby(['d','p','month','day','year','sv','dv','os','osa','osv','gid'],as_index=False).max().drop_duplicates()
+    df = df.replace({'': None})
+    df = df.replace(' ', '')
+    d_dict = df.to_dict('r')
+    return d_dict
+
+
+
 def etl(start_date,end_date):
     #pdb.set_trace()
     #extract
@@ -325,25 +363,25 @@ def etl(start_date,end_date):
         #transform
         internal_list = [doc for doc in docs if ('a' in doc.keys() and internal_apps_regex().search(doc['a']))]
         external_list = filter(lambda i: i not in internal_list, docs)
+        external_list = group_external_apps(external_list)
         external_list = update_list_with_lang_ver_framework(external_list)
         #load
+        end_time = datetime.today()
+        time_elapsed = end_time - start_time
+        print("parsing took {}".format(time_elapsed))
         print("inserting internal tools:")
-        internal_collection.insert_many(internal_list)
+        if len(internal_list) > 0:
+            internal_collection.insert_many(internal_list)
         print("inserting external apps:")
-        staging_collection.insert_many(external_list)
-        #logging.info("inserted %s docs",len(docs))
+        start_time = datetime.today()
+        external_collection.insert_many(external_list)
+        end_time = datetime.today()
+        time_elapsed = end_time - start_time
+        print("insert took {}".format(time_elapsed))
+        #logging.info("inserted %s docs",len(external_list))
     else:
         logging.info("no docs. Check original dataset")
-    end_time = datetime.today()
-    time_elapsed = end_time - start_time
-    print("parsing took {}".format(time_elapsed))
-    print('finished staging etl')
-    print("starting etl_external_drivers:")
     client.close()
-    print("starting etl_external_drivers")
-    etl_external_drivers()
-    print("dropping staging collection")
-    staging_collection.drop()
     print("Done.")
 
 def etl_external_drivers():
@@ -393,7 +431,7 @@ def get_raw_client_metadata(client):
 def etl_for_range_of_dates(start_date,end_date):
     while (end_date - timedelta(MAX_DELTA)) > start_date:
         interim_start_date = end_date - timedelta(MAX_DELTA)
-        print("running staging etl for start_date: %s, end_date: %s" % (interim_start_date,end_date))
+        print("running etl for start_date: %s, end_date: %s" % (interim_start_date,end_date))
         etl(interim_start_date,end_date)
         end_date = interim_start_date
     if (end_date > start_date):
@@ -410,7 +448,6 @@ if __name__ == "__main__":
     parser.add_argument('-start_delta', default = 7, type=int)
     parser.add_argument('-end_date') # format '%Y%m%d'
     parser.add_argument('-start_date')
-    #parser.add_argument('--default_dates', dest='since_last', action='store_true')
     parser.add_argument('--no-default_dates', dest='since_last', action='store_false')
     parser.set_defaults(since_last=True)
     options = parser.parse_args()
@@ -418,7 +455,6 @@ if __name__ == "__main__":
     print('connecting..')
     my_cluster = pymongo.MongoClient(postprocessing_connection_string(options.u_postprocessing,options.pw_postprocessing),retryWrites = True,socketTimeoutMS = 3600000)
     db = my_cluster.drivers
-    staging_collection = db[STAGING_COLLECTION]
     internal_collection = db[INTERNAL_TOOLS_COLLECTION]
     external_collection = db[EXTERNAL_APPS_COLLECTION]
     print('deriving dates...')
