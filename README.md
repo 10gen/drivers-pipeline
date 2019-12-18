@@ -1,5 +1,5 @@
 # drivers-pipeline (WIP)
-This repo contains an ETL script that executes postprocessing for of the raw client metadata telemetry into an analytical dataset. For more information refer to this [Design Doc](https://docs.google.com/document/d/1LUpcHjOvAT3jSUSKkzE5esfIqgEYQQ6beY3x-kGHv7E/edit?usp=sharing).
+This repo contains an ETL script that executes postprocessing for of the raw client metadata telemetry into an analytical dataset. For more information refer to this [Scope Doc](https://docs.google.com/document/d/17qh35ev7AJlDvReYpg25fXRRGyCYzYj_Vput4tKkxi4/edit?usp=sharing).
 
 The resulting dataset resides in an MDB collection. Please contact Natalya Furmanova for access. 
 
