@@ -26,7 +26,7 @@ INTERNAL_TOOLS_COLLECTION = "stats_internal_daily"
 EXTERNAL_APPS_COLLECTION = 'stats_external_daily'
 
 def internal_apps_regex():
-    regex = re.compile(r"(stitch\||mongosqld|MongoDB Automation Agent|MongoDB Atlas|MongoDB Compass|mongoimport|mongoexport|mongodump|mongorestore|mongomirror)")
+    regex = re.compile(r"(stitch\||mongosqld|mongodrdl|MongoDB Automation Agent|MongoDB Atlas|MongoDB Compass|mongoimport|mongoexport|mongodump|mongorestore|mongomirror|MongoDB PIT|MongoDB CPS|MongoDB Backup|MongoDB Monitoring)")
     return regex
 
 
@@ -45,7 +45,6 @@ def end_date(days=0):
 
 def start_and_end_date(end_date_string=None,start_date_string=None):
     end_date = get_date(end_date_string)
-    #start_date = end_date -timedelta(delta)
     start_date = get_date(start_date_string)
     return (start_date,end_date)
 
@@ -92,6 +91,7 @@ def other_drivers_names():
                 'mongo-go-driver',
                 'mongo-ruby-driver',
                 'mongo-rust-driver-prototype',
+                'mongo-rust-driver',
                 'mongoc',
                 'mongoc / ext-mongodb:HHVM',
                 'mongoc / ext-mongodb:PHP',
@@ -103,6 +103,10 @@ def other_drivers_names():
                 'nodejs-core',
                 'PyMongo',
                 'PyMongo|Motor',
+                'PyMongo|PyMODM',
+                'nodejs|Mongoose',
+                'mongo-java-driver|mongo-spark',
+                'mongo-java-driver|legacy|mongo-spark',
                 'mongo-java-driver|sync|mongo-kafka'
             ]
 
@@ -291,7 +295,6 @@ def language_version_and_framework(doc):
                 }
             else:
                 pass
-
             if language_version is not None:
                 doc['lver'] = language_version
             if framework is not None:
@@ -334,7 +337,8 @@ def function_with_time_elapsed(message):
 
 def group_external_apps(list):
     df = pd.DataFrame(list)
-    df = df.drop(columns=['a'])
+    if 'a' in df.columns:
+        df = df.drop(columns=['a'])
     df = df.replace('', ' ', regex = True)
     df = df.replace(np.nan, '', regex = True)
     df = df.groupby(['d','p','month','day','year','sv','dv','os','osa','osv','gid'],as_index=False).max().drop_duplicates()
