@@ -21,7 +21,7 @@ BIC_NAMES = [
     'mongodrdl'
 ]
 
-SOURCE_TABLE='cloud_backend_raw_stage.dw__cloud_backend__rawclientmetadata'
+SOURCE_TABLE='cloud_backend_raw.dw__cloud_backend__rawclientmetadata'
 
 def driver_names_joined(names_list):
     return "'" + "','".join(names_list)+"'"
@@ -45,8 +45,8 @@ def query_new_vs_existing_6_months(names_list):
    min(rt) as min_rt_month\
    from {0} where \
    entries__raw__driver__name in ({1})\
-               and date(rt) >= date '{2}' and processed_date >= '{3}'\
-               and date(rt) < date '{2}' and processed_date <= '{3}'\
+               and date(rt) >= date '{2}' and processed_date >= '{2}'\
+               and date(rt) < date '{3}' and processed_date <= '{3}'\
                group by month(rt), year(rt), gid__oid\
  ),\
   min_dates_overall as (\
@@ -120,7 +120,23 @@ def query_connectors_weekly(names_list):
     return query
 
 def query_bic_weekly():
-    query = query_connectors_weekly(driver_names_joined(BIC_NAMES))
+    query ="""
+        WITH start_of_time as (select date_add('day',-(day_of_week(current_date)-1)-56,current_date) as day)\
+        select count(distinct group_id) as groups_count, max(ts) as max_ts,min(ts) as min_ts, week\
+        FROM \
+     (SELECT \
+     date_trunc('week',rt) as week,\
+     rt as ts,\
+     gid__oid as group_id\
+     from \
+     {0} where entries__raw__application__name in \
+     ({1})\
+      and date(rt) >= (select day from start_of_time limit 1)\
+     )\
+     group by week\
+     order by week
+    """.format(SOURCE_TABLE,driver_names_joined(BIC_NAMES))
+    print(query)
     return query
 
 def query_spark_weekly():
@@ -139,20 +155,20 @@ def query_kafka_source_vs_sink_monthly():
         entries__raw__driver__name as driver_name\
         from {0} \
         where entries__raw__driver__name in ({1})\
-        and processed_date >= '2020-06-01' and rt >= date '2020-06-01'\
+        and processed_date >= '2020-06-01' and rt >= date '2020-06-01'\ # start of tracking this
         group by entries__raw__driver__name, year(rt), month(rt)\
         order by year, month\
     """.format(SOURCE_TABLE,driver_names_joined(KAFKA_NAMES))
     return query
 
 collections_queries = [
-{'spark_monthly_new_vs_existing': query_spark_new_vs_existing_6_months()},
-{'kafka_monthly_new_vs_existing': query_kafka_new_vs_existing_6_months()},
-{'bic_active_clusters': query_bic_clusters()},
-{'bic_usage_weekly': query_bic_weekly()},
-{'kafka_weekly': query_kafka_weekly()},
-{'spark_weekly': query_spark_weekly()},
-{'kafka_sink_source_monthly': query_kafka_source_vs_sink_monthly()}
+    {'spark_monthly_new_vs_existing': query_spark_new_vs_existing_6_months()},
+    {'kafka_monthly_new_vs_existing': query_kafka_new_vs_existing_6_months()},
+    {'bic_active_clusters': query_bic_clusters()},
+    {'bic_usage_weekly': query_bic_weekly()},
+    {'kafka_weekly': query_kafka_weekly()},
+    {'spark_weekly': query_spark_weekly()},
+    {'kafka_sink_source_monthly': query_kafka_source_vs_sink_monthly()}
 ]
 
 def run_query(query):

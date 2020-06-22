@@ -15,6 +15,11 @@ from pyathenajdbc import connect
 from queries_connectors import *
 from connections import athena_connection, postprocessing_connection
 
+"""
+Load step of the ETL for one collection and one list of docs. Creates a new
+collection, loads data, then in case of success deletes the old one and
+renames the new one (i.e. removes the suffix "_new")
+"""
 def load(collection,docs):
     conn = postprocessing_connection()
     db = conn.connectors
