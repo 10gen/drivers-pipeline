@@ -2,7 +2,7 @@ import re
 from datetime import datetime, timezone
 from dateutil.relativedelta import *
 
-SOURCE_TABLE = 'cloud_backend_raw_stage.dw__cloud_backend__rawclientmetadata'
+SOURCE_TABLE = 'cloud_backend_raw.dw__cloud_backend__rawclientmetadata'
 MONTHLY_TRENDS_TABLE = 'drivers_monthly_trends'
 def java_driver_names():
     return [

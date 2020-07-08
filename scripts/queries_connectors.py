@@ -202,9 +202,9 @@ def query_kafka_source_vs_sink_monthly():
         entries__raw__driver__name as driver_name\
         from {0} \
         where entries__raw__driver__name in ({1})\
-        and processed_date >= '2020-06-01' and rt >= date '2020-06-01'\ # start of tracking this
+        and processed_date >= '2020-06-01' and rt >= date '2020-06-01'\
         group by entries__raw__driver__name, year(rt), month(rt)\
-        order by year, month\
+        order by year, month
     """.format(SOURCE_TABLE,driver_names_joined(KAFKA_NAMES))
     return query
 
