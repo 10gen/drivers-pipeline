@@ -9,7 +9,7 @@ import datetime
 import pprint
 from datetime import timezone, datetime, tzinfo, date,time, timedelta
 import pdb
-#import logging
+import logging
 import time
 from pyathenajdbc import connect
 from queries_connectors import collections_queries
