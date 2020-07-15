@@ -3,7 +3,8 @@ from datetime import datetime, timezone
 from dateutil.relativedelta import *
 
 SOURCE_TABLE = 'cloud_backend_raw.dw__cloud_backend__rawclientmetadata'
-MONTHLY_TRENDS_TABLE = 'drivers_monthly_trends'
+MONTHLY_TRENDS_TABLE = 'drivers_monthly_trends_new'
+
 def java_driver_names():
     return [
         'mongo-java-driver',
@@ -149,6 +150,9 @@ def query_drivers(start_date,end_date):
        entries__raw__driver__name IN ({1})\
        and processed_date >= '{2}' and processed_date <= '{3}'\
        and rt >= date '{2}' and rt < date '{3}' and \
+       entries__raw__driver__version not like '018%' and\
+       entries__raw__driver__version not like '019%' and\
+       entries__raw__os__version not like '3T%' and\
        (entries__raw__application__name is NULL or \
        (entries__raw__application__name not in('mongodump','mongotop','mongorestore','mongodrdl','mongosqld',\
                                             'mongoimport','mongoexport','mongodump','mongorestore',\
@@ -178,18 +182,27 @@ def aggregate_monthly_trends(start_date):
     return [
     {
         '$match': {
-            'd': {
-                '$ne': 'mongo-go-driver'
-            },
             'ts': {
                 '$gte': trends_start_date
             }
         }
-    }, {
+    },{
         '$project': {
             'd': {
                 '$switch': {
                     'branches': [
+                         {
+                            'case': {
+                                '$gt': [
+                                    {
+                                        '$indexOfCP': [
+                                            '$d', 'scala'
+                                        ]
+                                    }, -1
+                                ]
+                            },
+                            'then': 'scala'
+                        },
                         {
                             'case': {
                                 '$gt': [
@@ -252,12 +265,37 @@ def aggregate_monthly_trends(start_date):
             },
             'm': 1,
             'y': 1,
-            'sv': 1,
-            'dv': 1,
-            'lver': 1,
             'gid': 1,
             'ts': 1,
-            'i': 1
+        }
+    },
+    {
+        '$group': {
+            '_id': {
+                'm': '$m',
+                'y': '$y',
+                'd': '$d'
+            },
+            'gids': {
+                '$addToSet': '$gid'
+            },
+            'ts': {
+                '$min': '$ts'
+            }
+        }
+    },
+     {
+        '$project': {
+
+                'm': '$_id.m',
+                'y': '$_id.y',
+                'd': '$_id.d',
+
+            'gid_count': {
+                '$size': '$gids'
+            },
+            'ts': 1,
+            '_id': 0
         }
     },
     {

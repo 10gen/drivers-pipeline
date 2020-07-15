@@ -4,6 +4,7 @@ from dateutil.relativedelta import *
 
 COMPASS_APP_NAME_PATTERN = 'MongoDB Compass'
 VS_CODE_NAME_PATTERN = 'vscode'
+NEW_SHELL_NAME_PATTERN = 'mongosh'
 
 def dates():
     today = datetime.today()
@@ -100,8 +101,12 @@ def query_compass():
 def query_vscode():
     return query_template_tools(VS_CODE_NAME_PATTERN)
 
+def query_newshell():
+    return query_template_tools(NEW_SHELL_NAME_PATTERN)
+
 def collections_queries():
     return [
-        {'compass_monthly_free_paid': query_compass()}#,
-    #    {'vscode_monthly_free_paid': query_vscode()}
+        {'compass_monthly_free_paid': query_compass()},
+        {'vscode_monthly_free_paid': query_vscode()},
+        {'new_shell_monthly_free_paid': query_newshell()}
     ]
