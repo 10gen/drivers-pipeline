@@ -35,9 +35,8 @@ def run_query(query):
         conn.close()
 
 """
-Load step of the ETL for one collection and one list of docs. Creates a new
-collection, loads data, then in case of success deletes the old one and
-renames the new one (i.e. removes the suffix "_new")
+Load step of the ETL for one collection and one list of docs. Inserts the record
+for the new month into a collection. There is only 1 record to be inserted per month.
 """
 def load(collection,docs):
     conn = postprocessing_connection()
