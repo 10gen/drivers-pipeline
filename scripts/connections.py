@@ -11,8 +11,11 @@ def prod_connection_string(username,password):
     return "mongodb://{}:{}@datawarehouseprod-shard-00-00-coq6x.mongodb.net:27017,datawarehouseprod-shard-00-01-coq6x.mongodb.net:27017,datawarehouseprod-shard-00-02-coq6x.mongodb.net:27017/test?ssl=true&replicaSet=DataWarehouseProd-shard-0&authSource=admin".format(username,password)
 
 def postprocessing_connection_string(username,password):
-    return "mongodb+srv://{}:{}@cluster0-ee68b.mongodb.net/test".\
-    format(username,password)
+    # When it's time to run for real, export NATALYA_CLUSTER_URI="mongodb+srv://{}:{}@cluster0-ee68b.mongodb.net/test"
+    uri = os.environ.get('NATALYA_CLUSTER_URI', 'localhost:27017').format(username,password)
+    return uri
+
+
 
 def get_postprocessing_secrets():
     u_postprocessing = os.environ.get('U_POSTPROCESSING')
