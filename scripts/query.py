@@ -150,9 +150,6 @@ def query_drivers(start_date,end_date):
        entries__raw__driver__name IN ({1})\
        and processed_date >= '{2}' and processed_date <= '{3}'\
        and rt >= date '{2}' and rt < date '{3}' and \
-       entries__raw__driver__version not like '018%' and\
-       entries__raw__driver__version not like '019%' and\
-       entries__raw__os__version not like '3T%' and\
        (entries__raw__application__name is NULL or \
        (entries__raw__application__name not in('mongodump','mongotop','mongorestore','mongodrdl','mongosqld',\
                                             'mongoimport','mongoexport','mongodump','mongorestore',\
@@ -160,7 +157,29 @@ def query_drivers(start_date,end_date):
     entries__raw__application__name not like 'stitch|%' and \
     lower(entries__raw__application__name) not like 'mongodb%' and \
           entries__raw__application__name not like 'mongosh%' and \
-    entries__raw__application__name not like 'realm|%')))\
+    entries__raw__application__name not like 'realm|%'))\
+     EXCEPT \
+        (SELECT rt AS ts,\
+         entries__raw__driver__name AS d,\
+         entries__raw__driver__version AS dv,\
+         gid__oid AS gid,\
+         entries__raw__os__name AS os,\
+         entries__raw__os__architecture AS osa,\
+         entries__raw__os__version AS osv,\
+         entries__raw__platform AS p,\
+         mv AS sv,\
+         day_of_month(rt) AS day,\
+         month(rt) AS m,\
+         year(rt) AS y\
+        FROM {0}\
+        WHERE processed_date >= '{2}'\
+                AND processed_date <= '{3}'\
+                AND rt >= date '{2}'\
+                AND rt < date '{3}'\
+                AND entries__raw__driver__name LIKE '%java%'\
+                AND entries__raw__driver__version LIKE '018%'\
+                AND entries__raw__driver__version LIKE '019%'\
+                AND entries__raw__os__version LIKE '3T%'))\
     SELECT  d,\
             dv,\
             gid,\
