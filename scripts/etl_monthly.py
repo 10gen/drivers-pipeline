@@ -155,10 +155,14 @@ def load(docs,start_date):
     last_month_collection = db[LATEST_MONTH_COLLECTION]
     monthly_collection = db[MONTHLY_COLLECTION]
     try:
-        # TODO: redo via transaction
+        print("Starting to load last month's collection.")
         last_month_collection.drop() # easiest way to refill the collection
         last_month_collection.insert_many(docs)
+        print("Creating index for last month's collection.")
+        last_month_collection.create_index([ ("d", 1) ])
+        print("Inserting docs into the monthly collection.")
         monthly_collection.insert_many(docs)
+        print("Aggregating monthly trends")
         monthly_trends_query = aggregate_monthly_trends(start_date)
         print(monthly_trends_query)
         monthly_collection.aggregate(monthly_trends_query,\

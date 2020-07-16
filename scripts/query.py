@@ -3,7 +3,8 @@ from datetime import datetime, timezone
 from dateutil.relativedelta import *
 
 SOURCE_TABLE = 'cloud_backend_raw.dw__cloud_backend__rawclientmetadata'
-MONTHLY_TRENDS_TABLE = 'drivers_monthly_trends'
+MONTHLY_TRENDS_TABLE = 'drivers_monthly_trends_new'
+
 def java_driver_names():
     return [
         'mongo-java-driver',
@@ -156,7 +157,29 @@ def query_drivers(start_date,end_date):
     entries__raw__application__name not like 'stitch|%' and \
     lower(entries__raw__application__name) not like 'mongodb%' and \
           entries__raw__application__name not like 'mongosh%' and \
-    entries__raw__application__name not like 'realm|%')))\
+    entries__raw__application__name not like 'realm|%'))\
+     EXCEPT \
+        (SELECT rt AS ts,\
+         entries__raw__driver__name AS d,\
+         entries__raw__driver__version AS dv,\
+         gid__oid AS gid,\
+         entries__raw__os__name AS os,\
+         entries__raw__os__architecture AS osa,\
+         entries__raw__os__version AS osv,\
+         entries__raw__platform AS p,\
+         mv AS sv,\
+         day_of_month(rt) AS day,\
+         month(rt) AS m,\
+         year(rt) AS y\
+        FROM {0}\
+        WHERE processed_date >= '{2}'\
+                AND processed_date <= '{3}'\
+                AND rt >= date '{2}'\
+                AND rt < date '{3}'\
+                AND entries__raw__driver__name LIKE '%java%'\
+                AND entries__raw__driver__version LIKE '018%'\
+                AND entries__raw__driver__version LIKE '019%'\
+                AND entries__raw__os__version LIKE '3T%'))\
     SELECT  d,\
             dv,\
             gid,\
@@ -178,18 +201,27 @@ def aggregate_monthly_trends(start_date):
     return [
     {
         '$match': {
-            'd': {
-                '$ne': 'mongo-go-driver'
-            },
             'ts': {
                 '$gte': trends_start_date
             }
         }
-    }, {
+    },{
         '$project': {
             'd': {
                 '$switch': {
                     'branches': [
+                         {
+                            'case': {
+                                '$gt': [
+                                    {
+                                        '$indexOfCP': [
+                                            '$d', 'scala'
+                                        ]
+                                    }, -1
+                                ]
+                            },
+                            'then': 'scala'
+                        },
                         {
                             'case': {
                                 '$gt': [
@@ -252,12 +284,37 @@ def aggregate_monthly_trends(start_date):
             },
             'm': 1,
             'y': 1,
-            'sv': 1,
-            'dv': 1,
-            'lver': 1,
             'gid': 1,
             'ts': 1,
-            'i': 1
+        }
+    },
+    {
+        '$group': {
+            '_id': {
+                'm': '$m',
+                'y': '$y',
+                'd': '$d'
+            },
+            'gids': {
+                '$addToSet': '$gid'
+            },
+            'ts': {
+                '$min': '$ts'
+            }
+        }
+    },
+     {
+        '$project': {
+
+                'm': '$_id.m',
+                'y': '$_id.y',
+                'd': '$_id.d',
+
+            'gid_count': {
+                '$size': '$gids'
+            },
+            'ts': 1,
+            '_id': 0
         }
     },
     {
